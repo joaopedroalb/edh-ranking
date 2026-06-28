@@ -6,22 +6,34 @@ import { Icon } from './Icon'
 
 type Props = {
   group: Group
+  selectedTierListId?: string
+  createMode?: boolean
   onBack: () => void
   onEditGroup: () => void
+  onOpenTierList: (tierListId: string) => void
+  onCreateTierList: () => void
+  onDeleted: (nextTierListId?: string) => void
 }
 
 type DeckOwner = { deck: CommanderDeck; participant: Participant }
 
 const EXTRA_TIER_COLORS = ['#89a8f5', '#b58be3', '#e17c9c', '#63b8ae', '#87929f']
 
-export function TierWorkspace({ group, onBack, onEditGroup }: Props) {
+export function TierWorkspace({
+  group,
+  selectedTierListId,
+  createMode = false,
+  onBack,
+  onEditGroup,
+  onOpenTierList,
+  onCreateTierList,
+  onDeleted,
+}: Props) {
   const { tierLists, upsertTierList, deleteTierList } = useStore()
   const groupLists = tierLists.filter((list) => list.groupId === group.id)
-  const [selectedId, setSelectedId] = useState(() => groupLists[0]?.id ?? '')
-  const [creating, setCreating] = useState(groupLists.length === 0)
   const [newListName, setNewListName] = useState('')
   const [createError, setCreateError] = useState('')
-  const selected = groupLists.find((list) => list.id === selectedId) ?? groupLists[0]
+  const selected = groupLists.find((list) => list.id === selectedTierListId)
 
   const allDecks = useMemo(
     () =>
@@ -38,25 +50,23 @@ export function TierWorkspace({ group, onBack, onEditGroup }: Props) {
     }
     const list = createTierList(group.id, newListName)
     upsertTierList(list)
-    setSelectedId(list.id)
     setNewListName('')
     setCreateError('')
-    setCreating(false)
+    onOpenTierList(list.id)
   }
 
   const removeList = (list: TierList) => {
     if (!window.confirm(`Excluir a tier list “${list.name}”?`)) return
-    deleteTierList(list.id)
     const next = groupLists.find((candidate) => candidate.id !== list.id)
-    setSelectedId(next?.id ?? '')
-    setCreating(!next)
+    deleteTierList(list.id)
+    onDeleted(next?.id)
   }
 
   return (
     <main className="tier-page">
       <div className="tier-topbar">
         <button className="back-link back-link--light" type="button" onClick={onBack}>
-          <Icon name="arrow-left" /> Grupos
+          <Icon name="arrow-left" /> Detalhes
         </button>
         <div className="tier-topbar__group">
           <span>{group.name.slice(0, 1).toUpperCase()}</span>
@@ -77,7 +87,7 @@ export function TierWorkspace({ group, onBack, onEditGroup }: Props) {
             <button
               className="icon-button icon-button--accent"
               type="button"
-              onClick={() => setCreating(true)}
+              onClick={onCreateTierList}
               aria-label="Nova tier list"
               title="Nova tier list"
             >
@@ -87,13 +97,10 @@ export function TierWorkspace({ group, onBack, onEditGroup }: Props) {
           <nav className="tier-list-nav" aria-label="Tier lists do grupo">
             {groupLists.map((list) => (
               <button
-                className={selected?.id === list.id && !creating ? 'is-active' : ''}
+                className={selected?.id === list.id && !createMode ? 'is-active' : ''}
                 type="button"
                 key={list.id}
-                onClick={() => {
-                  setSelectedId(list.id)
-                  setCreating(false)
-                }}
+                onClick={() => onOpenTierList(list.id)}
               >
                 <span className="nav-list-icon"><Icon name="layers" /></span>
                 <span><strong>{list.name}</strong><small>{list.tiers.length} tiers</small></span>
@@ -108,7 +115,7 @@ export function TierWorkspace({ group, onBack, onEditGroup }: Props) {
         </aside>
 
         <section className="tier-content">
-          {creating || !selected ? (
+          {createMode || !selected ? (
             <CreateTierList
               value={newListName}
               error={createError}
@@ -117,7 +124,9 @@ export function TierWorkspace({ group, onBack, onEditGroup }: Props) {
                 setNewListName(value)
                 setCreateError('')
               }}
-              onCancel={() => setCreating(false)}
+              onCancel={() =>
+                groupLists[0] ? onOpenTierList(groupLists[0].id) : onBack()
+              }
               onCreate={createList}
             />
           ) : (

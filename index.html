@@ -6,6 +6,18 @@
     <meta name="theme-color" content="#101914" />
     <meta name="description" content="Tier lists de Commander para a sua mesa." />
     <title>Commander Lab</title>
+    <script>
+      (() => {
+        try {
+          const saved = localStorage.getItem('theme')
+          const theme = saved === 'light' || saved === 'dark'
+            ? saved
+            : matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+          document.documentElement.dataset.theme = theme
+          document.documentElement.style.colorScheme = theme
+        } catch (_) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
