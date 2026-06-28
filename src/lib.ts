@@ -5,7 +5,7 @@ export const STORAGE_KEY = 'commander-lab-data-v1'
 export const uid = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
-export const emptyCard = (): CardData => ({ name: '', imageUrl: '' })
+export const emptyCard = (): CardData => ({ name: '', imageUrl: '', artCropUrl: '' })
 
 export const createDeck = (): CommanderDeck => ({
   id: uid('deck'),
@@ -36,7 +36,7 @@ export const createTierList = (groupId: string, name: string): TierList => ({
   id: uid('tierlist'),
   groupId,
   name: name.trim(),
-  tiers: DEFAULT_TIERS.map((tier) => ({ ...tier, id: uid('tier') })),
+  tiers: DEFAULT_TIERS.map((tier) => ({ ...tier, id: uid('tier'), order: [] })),
   assignments: [],
   createdAt: new Date().toISOString(),
 })
@@ -47,7 +47,10 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isString = (value: unknown): value is string => typeof value === 'string'
 
 const isCard = (value: unknown): value is CardData =>
-  isRecord(value) && isString(value.name) && isString(value.imageUrl)
+  isRecord(value) &&
+  isString(value.name) &&
+  isString(value.imageUrl) &&
+  (value.artCropUrl === undefined || isString(value.artCropUrl))
 
 const isDeck = (value: unknown): value is CommanderDeck =>
   isRecord(value) &&
@@ -79,7 +82,11 @@ const isTierList = (value: unknown): value is TierList =>
   Array.isArray(value.tiers) &&
   value.tiers.every(
     (tier) =>
-      isRecord(tier) && isString(tier.id) && isString(tier.name) && isString(tier.color),
+      isRecord(tier) &&
+      isString(tier.id) &&
+      isString(tier.name) &&
+      isString(tier.color) &&
+      (tier.order === undefined || (Array.isArray(tier.order) && tier.order.every(isString))),
   ) &&
   Array.isArray(value.assignments) &&
   value.assignments.every(
@@ -123,4 +130,3 @@ export const deckLabel = (deck: CommanderDeck) =>
   deck.partner?.name
     ? `${deck.commander.name} + ${deck.partner.name}`
     : deck.commander.name || 'Comandante sem nome'
-

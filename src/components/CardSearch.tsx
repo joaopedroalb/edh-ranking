@@ -5,8 +5,8 @@ import { Icon } from './Icon'
 type ScryfallCard = {
   id: string
   name: string
-  image_uris?: { normal?: string; small?: string }
-  card_faces?: Array<{ image_uris?: { normal?: string; small?: string } }>
+  image_uris?: { art_crop?: string; normal?: string; small?: string }
+  card_faces?: Array<{ image_uris?: { art_crop?: string; normal?: string; small?: string } }>
 }
 
 type Props = {
@@ -16,7 +16,7 @@ type Props = {
   placeholder?: string
 }
 
-const imageFromCard = (card: ScryfallCard, size: 'normal' | 'small') =>
+const imageFromCard = (card: ScryfallCard, size: 'art_crop' | 'normal' | 'small') =>
   card.image_uris?.[size] ?? card.card_faces?.[0]?.image_uris?.[size] ?? ''
 
 export function CardSearch({ value, onChange, label, placeholder }: Props) {
@@ -74,9 +74,12 @@ export function CardSearch({ value, onChange, label, placeholder }: Props) {
 
   const selectCard = (card: ScryfallCard) => {
     selectedName.current = card.name
+    const normalImage = imageFromCard(card, 'normal') || imageFromCard(card, 'art_crop')
+    const artCrop = imageFromCard(card, 'art_crop') || normalImage
     onChange({
       name: card.name,
-      imageUrl: imageFromCard(card, 'normal'),
+      imageUrl: normalImage,
+      artCropUrl: artCrop,
       scryfallId: card.id,
     })
     setOpen(false)
@@ -97,7 +100,7 @@ export function CardSearch({ value, onChange, label, placeholder }: Props) {
           onBlur={() => window.setTimeout(() => setOpen(false), 120)}
           onChange={(event) => {
             selectedName.current = ''
-            onChange({ name: event.target.value, imageUrl: '' })
+            onChange({ name: event.target.value, imageUrl: '', artCropUrl: '' })
           }}
         />
         {status === 'loading' && <span className="input-loader" aria-label="Buscando" />}

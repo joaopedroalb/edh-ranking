@@ -15,10 +15,12 @@ type ExportedCommander = {
   id: string
   name: string
   imageUrl: string
+  artCropUrl?: string
   scryfallId?: string
   isPartner: boolean
   partnerName: string | null
   partnerImageUrl?: string
+  partnerArtCropUrl?: string
   partnerScryfallId?: string
 }
 
@@ -126,10 +128,12 @@ export function createGroupExport(group: Group, tierLists: TierList[]): GroupExp
           id: deck.id,
           name: deck.commander.name,
           imageUrl: deck.commander.imageUrl,
+          ...(deck.commander.artCropUrl ? { artCropUrl: deck.commander.artCropUrl } : {}),
           ...(deck.commander.scryfallId ? { scryfallId: deck.commander.scryfallId } : {}),
           isPartner: Boolean(deck.partner),
           partnerName: deck.partner?.name ?? null,
           ...(deck.partner?.imageUrl ? { partnerImageUrl: deck.partner.imageUrl } : {}),
+          ...(deck.partner?.artCropUrl ? { partnerArtCropUrl: deck.partner.artCropUrl } : {}),
           ...(deck.partner?.scryfallId ? { partnerScryfallId: deck.partner.scryfallId } : {}),
         })),
       })),
@@ -218,6 +222,7 @@ export function parseGroupExport(raw: string, existingNames: string[]): GroupBun
         const card: CardData = {
           name: readString(commander.name, `${commanderPath}.name`).trim(),
           imageUrl: readString(commander.imageUrl, `${commanderPath}.imageUrl`, true),
+          artCropUrl: readOptionalString(commander.artCropUrl, `${commanderPath}.artCropUrl`) ?? '',
           ...(readOptionalString(commander.scryfallId, `${commanderPath}.scryfallId`)
             ? { scryfallId: String(commander.scryfallId) }
             : {}),
@@ -230,6 +235,10 @@ export function parseGroupExport(raw: string, existingNames: string[]): GroupBun
             imageUrl: readOptionalString(
               commander.partnerImageUrl,
               `${commanderPath}.partnerImageUrl`,
+            ) ?? '',
+            artCropUrl: readOptionalString(
+              commander.partnerArtCropUrl,
+              `${commanderPath}.partnerArtCropUrl`,
             ) ?? '',
             ...(readOptionalString(
               commander.partnerScryfallId,
@@ -265,10 +274,28 @@ export function parseGroupExport(raw: string, existingNames: string[]): GroupBun
 
       const id = uid('tier')
       tierIdMap.set(oldTierId, id)
+      const sourceOrder = sourceTier.order === undefined
+        ? []
+        : readArray(sourceTier.order, `${tierPath}.order`)
+      const seenOrderIds = new Set<string>()
+      const order = sourceOrder.map((commanderIdValue, orderIndex) => {
+        const oldCommanderId = readString(
+          commanderIdValue,
+          `${tierPath}.order[${orderIndex}]`,
+        )
+        if (seenOrderIds.has(oldCommanderId)) {
+          throw new Error(`${tierPath}.order contém um comandante duplicado.`)
+        }
+        seenOrderIds.add(oldCommanderId)
+        const commanderId = commanderIdMap.get(oldCommanderId)
+        if (!commanderId) throw new Error(`${tierPath}.order referencia um comandante inexistente.`)
+        return commanderId
+      })
       return {
         id,
         name: readString(sourceTier.name, `${tierPath}.name`).trim(),
         color,
+        order,
       }
     })
 
@@ -346,7 +373,14 @@ export function cloneGroupBundle(
       const tiers = tierList.tiers.map((tier) => {
         const id = uid('tier')
         tierIdMap.set(tier.id, id)
-        return { ...tier, id }
+        return {
+          ...tier,
+          id,
+          order: (tier.order ?? []).flatMap((commanderId) => {
+            const mappedId = commanderIdMap.get(commanderId)
+            return mappedId ? [mappedId] : []
+          }),
+        }
       })
 
       return {

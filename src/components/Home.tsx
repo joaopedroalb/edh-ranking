@@ -172,7 +172,9 @@ function GroupCard({
   const decks = group.participants.flatMap((participant) =>
     participant.commanders.map((deck) => ({ deck, participant })),
   )
-  const images = decks.filter(({ deck }) => deck.commander.imageUrl).slice(0, 3)
+  const images = decks
+    .filter(({ deck }) => deck.commander.artCropUrl || deck.commander.imageUrl)
+    .slice(0, 3)
 
   return (
     <article className="group-card">
@@ -180,7 +182,11 @@ function GroupCard({
         {images.length ? (
           <div className={`group-card__images images-${images.length}`}>
             {images.map(({ deck }) => (
-              <img key={deck.id} src={deck.commander.imageUrl} alt={deckLabel(deck)} />
+              <img
+                key={deck.id}
+                src={deck.commander.artCropUrl || deck.commander.imageUrl}
+                alt={deckLabel(deck)}
+              />
             ))}
           </div>
         ) : (
