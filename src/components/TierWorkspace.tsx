@@ -1,5 +1,7 @@
-import { useMemo, useState } from 'react'
+import html2canvas from 'html2canvas'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createTierList, deckLabel, uid } from '../lib'
+import { fetchCardArtwork, type CardArtLookup } from '../scryfall'
 import { useStore } from '../store'
 import type { CommanderDeck, Group, Participant, TierList } from '../types'
 import { Icon } from './Icon'
@@ -18,6 +20,38 @@ type Props = {
 type DeckOwner = { deck: CommanderDeck; participant: Participant }
 
 const EXTRA_TIER_COLORS = ['#89a8f5', '#b58be3', '#e17c9c', '#63b8ae', '#87929f']
+const exportImageCache = new Map<string, Promise<string>>()
+
+const imageUrlAsDataUrl = (url: string) => {
+  if (url.startsWith('data:')) return Promise.resolve(url)
+  const cached = exportImageCache.get(url)
+  if (cached) return cached
+
+  const request = fetch(url, { cache: 'force-cache', mode: 'cors' })
+    .then((response) => {
+      if (!response.ok) throw new Error(`Falha ao carregar arte (${response.status})`)
+      return response.blob()
+    })
+    .then(
+      (blob) =>
+        new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () =>
+            typeof reader.result === 'string'
+              ? resolve(reader.result)
+              : reject(new Error('Imagem inválida'))
+          reader.onerror = () => reject(reader.error ?? new Error('Falha ao ler imagem'))
+          reader.readAsDataURL(blob)
+        }),
+    )
+    .catch((error) => {
+      exportImageCache.delete(url)
+      throw error
+    })
+
+  exportImageCache.set(url, request)
+  return request
+}
 
 export function TierWorkspace({
   group,
@@ -29,10 +63,12 @@ export function TierWorkspace({
   onCreateTierList,
   onDeleted,
 }: Props) {
-  const { tierLists, upsertTierList, deleteTierList } = useStore()
+  const { tierLists, upsertGroup, upsertTierList, deleteTierList } = useStore()
   const groupLists = tierLists.filter((list) => list.groupId === group.id)
   const [newListName, setNewListName] = useState('')
   const [createError, setCreateError] = useState('')
+  const [artworkLoading, setArtworkLoading] = useState(false)
+  const artworkHydrationStarted = useRef(false)
   const selected = groupLists.find((list) => list.id === selectedTierListId)
 
   const allDecks = useMemo(
@@ -42,6 +78,70 @@ export function TierWorkspace({
       ),
     [group],
   )
+
+  useEffect(() => {
+    if (artworkHydrationStarted.current) return
+    const lookups: CardArtLookup[] = group.participants.flatMap((participant) =>
+      participant.commanders.flatMap((deck) => [
+        ...(!deck.commander.artCropUrl && deck.commander.name
+          ? [{
+              key: `${deck.id}:commander`,
+              name: deck.commander.name,
+              scryfallId: deck.commander.scryfallId,
+            }]
+          : []),
+        ...(deck.partner && !deck.partner.artCropUrl && deck.partner.name
+          ? [{
+              key: `${deck.id}:partner`,
+              name: deck.partner.name,
+              scryfallId: deck.partner.scryfallId,
+            }]
+          : []),
+      ]),
+    )
+    if (lookups.length === 0) return
+
+    artworkHydrationStarted.current = true
+    setArtworkLoading(true)
+    void fetchCardArtwork(lookups)
+      .then((artwork) => {
+        if (artwork.size === 0) return
+        let changed = false
+        const participants = group.participants.map((participant) => ({
+          ...participant,
+          commanders: participant.commanders.map((deck) => {
+            const commanderArtwork = artwork.get(`${deck.id}:commander`)
+            const partnerArtwork = artwork.get(`${deck.id}:partner`)
+            if (!commanderArtwork && !partnerArtwork) return deck
+            changed = true
+            return {
+              ...deck,
+              commander: commanderArtwork
+                ? {
+                    ...deck.commander,
+                    imageUrl: deck.commander.imageUrl || commanderArtwork.imageUrl,
+                    artCropUrl: commanderArtwork.artCropUrl,
+                  }
+                : deck.commander,
+              ...(deck.partner
+                ? {
+                    partner: partnerArtwork
+                      ? {
+                          ...deck.partner,
+                          imageUrl: deck.partner.imageUrl || partnerArtwork.imageUrl,
+                          artCropUrl: partnerArtwork.artCropUrl,
+                        }
+                      : deck.partner,
+                  }
+                : {}),
+            }
+          }),
+        }))
+        if (changed) upsertGroup({ ...group, participants })
+      })
+      .catch(() => undefined)
+      .finally(() => setArtworkLoading(false))
+  }, [group, upsertGroup])
 
   const createList = () => {
     if (!newListName.trim()) {
@@ -135,6 +235,7 @@ export function TierWorkspace({
               tierList={selected}
               allDecks={allDecks}
               participants={group.participants}
+              artworkLoading={artworkLoading}
               onChange={upsertTierList}
               onDelete={() => removeList(selected)}
             />
@@ -197,20 +298,60 @@ function TierListEditor({
   tierList,
   allDecks,
   participants,
+  artworkLoading,
   onChange,
   onDelete,
 }: {
   tierList: TierList
   allDecks: DeckOwner[]
   participants: Participant[]
+  artworkLoading: boolean
   onChange: (tierList: TierList) => void
   onDelete: () => void
 }) {
   const [draggedId, setDraggedId] = useState('')
+  const [generatingImage, setGeneratingImage] = useState(false)
+  const [imageGenerationStatus, setImageGenerationStatus] = useState('')
+  const [shareError, setShareError] = useState('')
+  const sharePreviewRef = useRef<HTMLDivElement>(null)
 
-  const assignDeck = (commanderId: string, tierId: string) => {
+  const decksForTier = (tierId: string) => {
+    const tier = tierList.tiers.find((item) => item.id === tierId)
+    const assigned = allDecks.filter(({ deck }) =>
+      tierList.assignments.some(
+        (assignment) => assignment.commanderId === deck.id && assignment.tierId === tierId,
+      ),
+    )
+    const ownerById = new Map(assigned.map((owner) => [owner.deck.id, owner]))
+    const ordered = (tier?.order ?? []).flatMap((commanderId) => {
+      const owner = ownerById.get(commanderId)
+      if (!owner) return []
+      ownerById.delete(commanderId)
+      return [owner]
+    })
+    return [...ordered, ...assigned.filter(({ deck }) => ownerById.has(deck.id))]
+  }
+
+  const assignDeck = (commanderId: string, tierId: string, beforeCommanderId?: string) => {
+    const tiersWithoutCommander = tierList.tiers.map((tier) => ({
+      ...tier,
+      order: (tier.order ?? []).filter((id) => id !== commanderId),
+    }))
+
+    const nextTiers = tiersWithoutCommander.map((tier) => {
+      if (tier.id !== tierId) return tier
+      const currentOrder = decksForTier(tierId)
+        .map(({ deck }) => deck.id)
+        .filter((id) => id !== commanderId)
+      const insertIndex = beforeCommanderId ? currentOrder.indexOf(beforeCommanderId) : -1
+      if (insertIndex >= 0) currentOrder.splice(insertIndex, 0, commanderId)
+      else currentOrder.push(commanderId)
+      return { ...tier, order: currentOrder }
+    })
+
     onChange({
       ...tierList,
+      tiers: nextTiers,
       assignments: [
         ...tierList.assignments.filter((item) => item.commanderId !== commanderId),
         ...(tierId ? [{ commanderId, tierId }] : []),
@@ -218,11 +359,96 @@ function TierListEditor({
     })
   }
 
+  const moveWithinTier = (commanderId: string, tierId: string, direction: -1 | 1) => {
+    const order = decksForTier(tierId).map(({ deck }) => deck.id)
+    const currentIndex = order.indexOf(commanderId)
+    const targetIndex = currentIndex + direction
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= order.length) return
+    ;[order[currentIndex], order[targetIndex]] = [order[targetIndex], order[currentIndex]]
+    onChange({
+      ...tierList,
+      tiers: tierList.tiers.map((tier) =>
+        tier.id === tierId ? { ...tier, order } : tier,
+      ),
+    })
+  }
+
+  const generateImage = async () => {
+    if (!sharePreviewRef.current) return
+    setGeneratingImage(true)
+    setImageGenerationStatus('Preparando artes…')
+    setShareError('')
+    try {
+      await document.fonts?.ready
+      const images = Array.from(sharePreviewRef.current.querySelectorAll('img'))
+      const uniqueSources = [...new Set(images.map((image) => image.currentSrc || image.src))]
+      const localSources = new Map<string, string>()
+      let failedImages = 0
+
+      for (let index = 0; index < uniqueSources.length; index += 6) {
+        const batch = uniqueSources.slice(index, index + 6)
+        const results = await Promise.allSettled(batch.map(imageUrlAsDataUrl))
+        results.forEach((result, resultIndex) => {
+          if (result.status === 'fulfilled') localSources.set(batch[resultIndex], result.value)
+          else failedImages += 1
+        })
+        setImageGenerationStatus(
+          `Carregando artes… ${Math.min(index + batch.length, uniqueSources.length)}/${uniqueSources.length}`,
+        )
+      }
+
+      images.forEach((image) => {
+        const localSource = localSources.get(image.currentSrc || image.src)
+        if (localSource) image.src = localSource
+      })
+
+      await Promise.all(
+        images.map((image) => image.decode?.().catch(() => undefined) ?? Promise.resolve()),
+      )
+
+      if (uniqueSources.length > 0 && failedImages === uniqueSources.length) {
+        throw new Error('Nenhuma arte pôde ser preparada')
+      }
+
+      setImageGenerationStatus('Renderizando PNG…')
+
+      const canvas = await html2canvas(sharePreviewRef.current, {
+        backgroundColor: '#101914',
+        logging: false,
+        scale: 2,
+        useCORS: true,
+        windowWidth: 1200,
+      })
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((value) => value ? resolve(value) : reject(new Error('PNG vazio')), 'image/png')
+      })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      const safeName = tierList.name
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9-_]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .toLowerCase() || 'tier-list'
+      link.href = url
+      link.download = `${safeName}-commander-lab.png`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 0)
+    } catch {
+      setShareError('Não foi possível carregar as artes para o PNG. Verifique a conexão e tente novamente.')
+    } finally {
+      setGeneratingImage(false)
+      setImageGenerationStatus('')
+    }
+  }
+
   const addTier = () => {
     const color = EXTRA_TIER_COLORS[tierList.tiers.length % EXTRA_TIER_COLORS.length]
     onChange({
       ...tierList,
-      tiers: [...tierList.tiers, { id: uid('tier'), name: `Tier ${tierList.tiers.length + 1}`, color }],
+      tiers: [...tierList.tiers, { id: uid('tier'), name: `Tier ${tierList.tiers.length + 1}`, color, order: [] }],
     })
   }
 
@@ -235,13 +461,6 @@ function TierListEditor({
       assignments: tierList.assignments.filter((item) => item.tierId !== tierId),
     })
   }
-
-  const decksForTier = (tierId: string) =>
-    allDecks.filter(({ deck }) =>
-      tierList.assignments.some(
-        (assignment) => assignment.commanderId === deck.id && assignment.tierId === tierId,
-      ),
-    )
 
   const unassigned = allDecks.filter(
     ({ deck }) => !tierList.assignments.some((assignment) => assignment.commanderId === deck.id),
@@ -258,10 +477,29 @@ function TierListEditor({
             value={tierList.name}
             onChange={(event) => onChange({ ...tierList, name: event.target.value })}
           />
-          <p>Arraste os decks ou use o seletor em cada carta.</p>
+          <p>Arraste para ordenar ou use as setas e o seletor em cada carta.</p>
         </div>
-        <div className="autosave-badge"><span /> Salvo automaticamente</div>
+        <div className="tier-editor__header-actions">
+          <button
+            className="button button--secondary"
+            type="button"
+            onClick={generateImage}
+            disabled={generatingImage || artworkLoading}
+          >
+            {generatingImage || artworkLoading
+              ? <span className="input-loader input-loader--inline" />
+              : <Icon name="download" />}
+            {artworkLoading
+              ? 'Buscando art crops…'
+              : generatingImage
+                ? imageGenerationStatus || 'Gerando imagem…'
+                : 'Gerar imagem'}
+          </button>
+          <div className="autosave-badge"><span /> Salvo automaticamente</div>
+        </div>
       </header>
+
+      {shareError && <div className="alert alert--error share-error" role="alert">{shareError}</div>}
 
       {allDecks.length === 0 ? (
         <div className="workspace-empty panel">
@@ -280,7 +518,9 @@ function TierListEditor({
             </div>
 
             <div className="tier-board">
-              {tierList.tiers.map((tier) => (
+              {tierList.tiers.map((tier) => {
+                const tierDecks = decksForTier(tier.id)
+                return (
                 <div
                   className="tier-row"
                   key={tier.id}
@@ -326,7 +566,7 @@ function TierListEditor({
                     </button>
                   </div>
                   <div className="tier-dropzone">
-                    {decksForTier(tier.id).map((owner) => (
+                    {tierDecks.map((owner, orderIndex) => (
                       <DeckTile
                         key={owner.deck.id}
                         owner={owner}
@@ -334,12 +574,24 @@ function TierListEditor({
                         currentTier={tier.id}
                         onAssign={(tierId) => assignDeck(owner.deck.id, tierId)}
                         onDragStart={() => setDraggedId(owner.deck.id)}
+                        onDragEnd={() => setDraggedId('')}
+                        onDropBefore={(commanderId) => {
+                          if (commanderId !== owner.deck.id) {
+                            assignDeck(commanderId, tier.id, owner.deck.id)
+                          }
+                          setDraggedId('')
+                        }}
+                        canMoveUp={orderIndex > 0}
+                        canMoveDown={orderIndex < tierDecks.length - 1}
+                        onMoveUp={() => moveWithinTier(owner.deck.id, tier.id, -1)}
+                        onMoveDown={() => moveWithinTier(owner.deck.id, tier.id, 1)}
                       />
                     ))}
-                    {decksForTier(tier.id).length === 0 && <span className="drop-hint">Solte decks aqui</span>}
+                    {tierDecks.length === 0 && <span className="drop-hint">Solte decks aqui</span>}
                   </div>
                 </div>
-              ))}
+                )
+              })}
 
               <div
                 className="tier-row tier-row--unassigned"
@@ -361,6 +613,7 @@ function TierListEditor({
                       currentTier=""
                       onAssign={(tierId) => assignDeck(owner.deck.id, tierId)}
                       onDragStart={() => setDraggedId(owner.deck.id)}
+                      onDragEnd={() => setDraggedId('')}
                     />
                   ))}
                   {unassigned.length === 0 && <span className="drop-hint">Todos os decks foram classificados</span>}
@@ -372,6 +625,13 @@ function TierListEditor({
           <StatsPanel tierList={tierList} participants={participants} />
         </>
       )}
+
+      <TierSharePreview
+        containerRef={sharePreviewRef}
+        tierList={tierList}
+        tierDecks={tierList.tiers.map((tier) => ({ tier, decks: decksForTier(tier.id) }))}
+        unassigned={unassigned}
+      />
 
       <div className="tier-danger-zone">
         <button className="text-button text-button--danger" type="button" onClick={onDelete}>
@@ -388,12 +648,24 @@ function DeckTile({
   currentTier,
   onAssign,
   onDragStart,
+  onDragEnd,
+  onDropBefore,
+  canMoveUp = false,
+  canMoveDown = false,
+  onMoveUp,
+  onMoveDown,
 }: {
   owner: DeckOwner
   tiers: TierList['tiers']
   currentTier: string
   onAssign: (tierId: string) => void
   onDragStart: () => void
+  onDragEnd?: () => void
+  onDropBefore?: (commanderId: string) => void
+  canMoveUp?: boolean
+  canMoveDown?: boolean
+  onMoveUp?: () => void
+  onMoveDown?: () => void
 }) {
   const { deck, participant } = owner
   return (
@@ -405,13 +677,51 @@ function DeckTile({
         event.dataTransfer.effectAllowed = 'move'
         onDragStart()
       }}
+      onDragEnd={onDragEnd}
+      onDragOver={(event) => {
+        if (!onDropBefore) return
+        event.preventDefault()
+        event.stopPropagation()
+        event.dataTransfer.dropEffect = 'move'
+      }}
+      onDrop={(event) => {
+        if (!onDropBefore) return
+        event.preventDefault()
+        event.stopPropagation()
+        const commanderId = event.dataTransfer.getData('text/plain')
+        if (commanderId) onDropBefore(commanderId)
+      }}
     >
       <div className={`deck-tile__art ${deck.partner ? 'has-partner' : ''}`}>
-        {deck.commander.imageUrl ? <img src={deck.commander.imageUrl} alt="" /> : <Icon name="cards" />}
+        {deck.commander.artCropUrl || deck.commander.imageUrl ? (
+          <img src={deck.commander.artCropUrl || deck.commander.imageUrl} alt="" />
+        ) : <Icon name="cards" />}
         {deck.partner && (
-          deck.partner.imageUrl ? <img src={deck.partner.imageUrl} alt="" /> : <span className="partner-art-placeholder">+</span>
+          deck.partner.artCropUrl || deck.partner.imageUrl
+            ? <img src={deck.partner.artCropUrl || deck.partner.imageUrl} alt="" />
+            : <span className="partner-art-placeholder">+</span>
         )}
         <span className="drag-grip">⠿</span>
+        {currentTier && (
+          <span className="deck-order-controls" aria-label="Ordenar comandante">
+            <button
+              type="button"
+              disabled={!canMoveUp}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={onMoveUp}
+              aria-label={`Mover ${deckLabel(deck)} para cima`}
+              title="Mover para cima"
+            >↑</button>
+            <button
+              type="button"
+              disabled={!canMoveDown}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={onMoveDown}
+              aria-label={`Mover ${deckLabel(deck)} para baixo`}
+              title="Mover para baixo"
+            >↓</button>
+          </span>
+        )}
       </div>
       <div className="deck-tile__body">
         <strong title={deckLabel(deck)}>{deckLabel(deck)}</strong>
@@ -426,6 +736,66 @@ function DeckTile({
         </select>
       </div>
     </article>
+  )
+}
+
+function TierSharePreview({
+  containerRef,
+  tierList,
+  tierDecks,
+  unassigned,
+}: {
+  containerRef: React.RefObject<HTMLDivElement | null>
+  tierList: TierList
+  tierDecks: Array<{ tier: TierList['tiers'][number]; decks: DeckOwner[] }>
+  unassigned: DeckOwner[]
+}) {
+  return (
+    <div className="tier-share-preview" ref={containerRef} aria-hidden="true">
+      <header className="tier-share-preview__header">
+        <div><span>COMMANDER LAB</span><h1>{tierList.name}</h1></div>
+        <small>Tier list de Commander</small>
+      </header>
+      <div className="tier-share-preview__board">
+        {tierDecks.map(({ tier, decks }) => (
+          <div className="share-tier-row" key={tier.id}>
+            <div className="share-tier-label" style={{ '--share-tier-color': tier.color } as React.CSSProperties}>
+              {tier.name}
+            </div>
+            <div className="share-tier-decks">
+              {decks.map((owner) => <ShareDeck key={owner.deck.id} owner={owner} />)}
+              {decks.length === 0 && <span className="share-tier-empty">—</span>}
+            </div>
+          </div>
+        ))}
+        {unassigned.length > 0 && (
+          <div className="share-tier-row share-tier-row--unassigned">
+            <div className="share-tier-label">Não classificados</div>
+            <div className="share-tier-decks">
+              {unassigned.map((owner) => <ShareDeck key={owner.deck.id} owner={owner} />)}
+            </div>
+          </div>
+        )}
+      </div>
+      <footer>Organize · Classifique · Compare <strong>commander lab</strong></footer>
+    </div>
+  )
+}
+
+function ShareDeck({ owner: { deck, participant } }: { owner: DeckOwner }) {
+  const commanderArt = deck.commander.artCropUrl || deck.commander.imageUrl
+  const partnerArt = deck.partner?.artCropUrl || deck.partner?.imageUrl
+  return (
+    <div className={`share-deck ${deck.partner ? 'has-partner' : ''}`}>
+      <div className="share-deck__art">
+        {commanderArt ? <img crossOrigin="anonymous" src={commanderArt} alt="" /> : <span>?</span>}
+        {deck.partner && (
+          partnerArt ? <img crossOrigin="anonymous" src={partnerArt} alt="" /> : <span>+</span>
+        )}
+      </div>
+      <strong>{deckLabel(deck)}</strong>
+      <small>{participant.name}</small>
+    </div>
   )
 }
 

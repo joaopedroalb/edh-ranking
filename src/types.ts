@@ -1,6 +1,7 @@
 export type CardData = {
   name: string
   imageUrl: string
+  artCropUrl?: string
   scryfallId?: string
 }
 
@@ -27,6 +28,7 @@ export type Tier = {
   id: string
   name: string
   color: string
+  order?: string[]
 }
 
 export type TierAssignment = {

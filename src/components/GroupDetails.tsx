@@ -111,7 +111,9 @@ export function GroupDetails({
               <div className="details-deck-list">
                 {participant.commanders.map((deck) => (
                   <div key={deck.id}>
-                    {deck.commander.imageUrl ? <img src={deck.commander.imageUrl} alt="" /> : <span><Icon name="cards" /></span>}
+                    {deck.commander.artCropUrl || deck.commander.imageUrl ? (
+                      <img src={deck.commander.artCropUrl || deck.commander.imageUrl} alt="" />
+                    ) : <span><Icon name="cards" /></span>}
                     <strong title={deckLabel(deck)}>{deckLabel(deck)}</strong>
                   </div>
                 ))}
