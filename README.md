@@ -1,0 +1,33 @@
+# Commander Lab
+
+Aplicativo frontend para criar grupos de Commander, cadastrar decks pela Scryfall e montar tier lists com ranking automático por jogador.
+
+## Como executar
+
+```bash
+npm install
+npm run dev
+```
+
+Para gerar a versão de produção:
+
+```bash
+npm run build
+```
+
+## Recursos
+
+- Grupos com participantes e múltiplos decks por jogador
+- Importação, exportação e clonagem completa de grupos
+- Comandantes únicos ou em dupla
+- Busca com autocomplete e imagens pela API da Scryfall
+- Tier lists com nomes, cores e quantidade de tiers personalizáveis
+- Atribuição por arrastar e soltar ou por seletor
+- Média, ranking e distribuição de tiers por jogador
+- Persistência completa no `localStorage`
+- Recuperação segura de dados locais inválidos e fallback quando a API estiver offline
+- Layout responsivo para desktop e celular
+
+## Pontuação
+
+O tier mais alto vale uma quantidade de pontos igual ao total de tiers; cada nível abaixo vale um ponto a menos. A média considera apenas os decks já classificados.
