@@ -7,12 +7,13 @@ import { Icon } from './Icon'
 
 type Props = {
   onCreate: () => void
+  onOpen: (group: Group) => void
   onEdit: (group: Group) => void
   onTierList: (group: Group) => void
   onNotify: (message: string, type?: 'success' | 'error') => void
 }
 
-export function Home({ onCreate, onEdit, onTierList, onNotify }: Props) {
+export function Home({ onCreate, onOpen, onEdit, onTierList, onNotify }: Props) {
   const { groups, tierLists, addGroupBundle } = useStore()
   const importInputRef = useRef<HTMLInputElement>(null)
   const [importing, setImporting] = useState(false)
@@ -140,6 +141,7 @@ export function Home({ onCreate, onEdit, onTierList, onNotify }: Props) {
                 key={group.id}
                 group={group}
                 listCount={tierLists.filter((list) => list.groupId === group.id).length}
+                onOpen={() => onOpen(group)}
                 onEdit={() => onEdit(group)}
                 onTierList={() => onTierList(group)}
                 onClone={() => cloneGroup(group)}
@@ -155,12 +157,14 @@ export function Home({ onCreate, onEdit, onTierList, onNotify }: Props) {
 function GroupCard({
   group,
   listCount,
+  onOpen,
   onEdit,
   onTierList,
   onClone,
 }: {
   group: Group
   listCount: number
+  onOpen: () => void
   onEdit: () => void
   onTierList: () => void
   onClone: () => void
@@ -185,7 +189,7 @@ function GroupCard({
         <span className="list-count">{listCount} {listCount === 1 ? 'tier list' : 'tier lists'}</span>
       </div>
       <div className="group-card__body">
-        <h3>{group.name}</h3>
+        <button className="group-card__title" type="button" onClick={onOpen}>{group.name}</button>
         <div className="group-card__meta">
           <span><Icon name="users" /> {group.participants.length} participantes</span>
           <span><Icon name="layers" /> {decks.length} decks</span>

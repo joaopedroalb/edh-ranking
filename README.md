@@ -19,6 +19,8 @@ npm run build
 
 - Grupos com participantes e múltiplos decks por jogador
 - Importação, exportação e clonagem completa de grupos
+- Rotas compartilháveis com histórico do navegador e página 404
+- Tema claro/escuro persistido com detecção da preferência do sistema
 - Comandantes únicos ou em dupla
 - Busca com autocomplete e imagens pela API da Scryfall
 - Tier lists com nomes, cores e quantidade de tiers personalizáveis
