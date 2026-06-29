@@ -115,6 +115,18 @@ export function GroupDetails({
                       <img src={deck.commander.artCropUrl || deck.commander.imageUrl} alt="" />
                     ) : <span><Icon name="cards" /></span>}
                     <strong title={deckLabel(deck)}>{deckLabel(deck)}</strong>
+                    {deck.deckUrl && (
+                      <a
+                        className="details-deck-link"
+                        href={deck.deckUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={`Abrir decklist de ${deckLabel(deck)}`}
+                        title="Abrir decklist"
+                      >
+                        <Icon name="link" />
+                      </a>
+                    )}
                   </div>
                 ))}
                 {participant.commanders.length === 0 && <p>Nenhum deck cadastrado.</p>}

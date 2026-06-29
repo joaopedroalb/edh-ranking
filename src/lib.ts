@@ -10,7 +10,17 @@ export const emptyCard = (): CardData => ({ name: '', imageUrl: '', artCropUrl: 
 export const createDeck = (): CommanderDeck => ({
   id: uid('deck'),
   commander: emptyCard(),
+  deckUrl: '',
 })
+
+export const isValidDeckUrl = (value: string) => {
+  try {
+    const url = new URL(value.trim())
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
 
 export const createParticipant = (): Participant => ({
   id: uid('player'),
@@ -38,6 +48,7 @@ export const createTierList = (groupId: string, name: string): TierList => ({
   name: name.trim(),
   tiers: DEFAULT_TIERS.map((tier) => ({ ...tier, id: uid('tier'), order: [] })),
   assignments: [],
+  unassignedOrder: [],
   createdAt: new Date().toISOString(),
 })
 
@@ -56,7 +67,8 @@ const isDeck = (value: unknown): value is CommanderDeck =>
   isRecord(value) &&
   isString(value.id) &&
   isCard(value.commander) &&
-  (value.partner === undefined || isCard(value.partner))
+  (value.partner === undefined || isCard(value.partner)) &&
+  (value.deckUrl === undefined || isString(value.deckUrl))
 
 const isParticipant = (value: unknown): value is Participant =>
   isRecord(value) &&
@@ -94,7 +106,9 @@ const isTierList = (value: unknown): value is TierList =>
       isRecord(assignment) &&
       isString(assignment.commanderId) &&
       isString(assignment.tierId),
-  )
+  ) &&
+  (value.unassignedOrder === undefined ||
+    (Array.isArray(value.unassignedOrder) && value.unassignedOrder.every(isString)))
 
 export const readStoredData = (): { data: AppData; warning: string } => {
   const empty: AppData = { groups: [], tierLists: [] }

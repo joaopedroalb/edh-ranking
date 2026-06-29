@@ -22,6 +22,15 @@ type DeckOwner = { deck: CommanderDeck; participant: Participant }
 const EXTRA_TIER_COLORS = ['#89a8f5', '#b58be3', '#e17c9c', '#63b8ae', '#87929f']
 const exportImageCache = new Map<string, Promise<string>>()
 
+const shuffled = <T,>(items: T[]) => {
+  const result = [...items]
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const target = Math.floor(Math.random() * (index + 1))
+    ;[result[index], result[target]] = [result[target], result[index]]
+  }
+  return result
+}
+
 const imageUrlAsDataUrl = (url: string) => {
   if (url.startsWith('data:')) return Promise.resolve(url)
   const cached = exportImageCache.get(url)
@@ -313,6 +322,7 @@ function TierListEditor({
   const [generatingImage, setGeneratingImage] = useState(false)
   const [imageGenerationStatus, setImageGenerationStatus] = useState('')
   const [shareError, setShareError] = useState('')
+  const [shuffling, setShuffling] = useState(false)
   const sharePreviewRef = useRef<HTMLDivElement>(null)
 
   const decksForTier = (tierId: string) => {
@@ -332,6 +342,20 @@ function TierListEditor({
     return [...ordered, ...assigned.filter(({ deck }) => ownerById.has(deck.id))]
   }
 
+  const unassignedDecks = () => {
+    const available = allDecks.filter(
+      ({ deck }) => !tierList.assignments.some((assignment) => assignment.commanderId === deck.id),
+    )
+    const ownerById = new Map(available.map((owner) => [owner.deck.id, owner]))
+    const ordered = (tierList.unassignedOrder ?? []).flatMap((commanderId) => {
+      const owner = ownerById.get(commanderId)
+      if (!owner) return []
+      ownerById.delete(commanderId)
+      return [owner]
+    })
+    return [...ordered, ...available.filter(({ deck }) => ownerById.has(deck.id))]
+  }
+
   const assignDeck = (commanderId: string, tierId: string, beforeCommanderId?: string) => {
     const tiersWithoutCommander = tierList.tiers.map((tier) => ({
       ...tier,
@@ -348,10 +372,15 @@ function TierListEditor({
       else currentOrder.push(commanderId)
       return { ...tier, order: currentOrder }
     })
+    const unassignedOrder = unassignedDecks()
+      .map(({ deck }) => deck.id)
+      .filter((id) => id !== commanderId)
+    if (!tierId) unassignedOrder.push(commanderId)
 
     onChange({
       ...tierList,
       tiers: nextTiers,
+      unassignedOrder,
       assignments: [
         ...tierList.assignments.filter((item) => item.commanderId !== commanderId),
         ...(tierId ? [{ commanderId, tierId }] : []),
@@ -371,6 +400,44 @@ function TierListEditor({
         tier.id === tierId ? { ...tier, order } : tier,
       ),
     })
+  }
+
+  const randomizeUnassigned = () => {
+    const pool = unassignedDecks()
+    if (pool.length < 2) return
+
+    const queues = new Map<string, DeckOwner[]>()
+    pool.forEach((owner) => {
+      const current = queues.get(owner.participant.id) ?? []
+      current.push(owner)
+      queues.set(owner.participant.id, current)
+    })
+    let activeQueues = shuffled(
+      [...queues.entries()].map(([participantId, decks]) => ({
+        participantId,
+        decks: shuffled(decks),
+      })),
+    )
+    const randomizedOrder: string[] = []
+    let previousParticipantId = ''
+
+    while (activeQueues.length > 0) {
+      const alternatingQueues = activeQueues.filter(
+        (queue) => queue.participantId !== previousParticipantId,
+      )
+      const candidates = alternatingQueues.length > 0 ? alternatingQueues : activeQueues
+      const selectedQueue = candidates[Math.floor(Math.random() * candidates.length)]
+      const nextDeck = selectedQueue.decks.shift()
+      if (nextDeck) randomizedOrder.push(nextDeck.deck.id)
+      previousParticipantId = selectedQueue.participantId
+      activeQueues = activeQueues.filter((queue) => queue.decks.length > 0)
+    }
+
+    setShuffling(true)
+    window.setTimeout(() => {
+      onChange({ ...tierList, unassignedOrder: randomizedOrder })
+      window.setTimeout(() => setShuffling(false), 520)
+    }, 180)
   }
 
   const generateImage = async () => {
@@ -453,18 +520,23 @@ function TierListEditor({
   }
 
   const removeTier = (tierId: string) => {
-    const hasAssignments = tierList.assignments.some((item) => item.tierId === tierId)
+    const movedCommanderIds = tierList.assignments
+      .filter((item) => item.tierId === tierId)
+      .map((item) => item.commanderId)
+    const hasAssignments = movedCommanderIds.length > 0
     if (hasAssignments && !window.confirm('Os decks deste tier voltarão para “Não classificados”. Continuar?')) return
     onChange({
       ...tierList,
       tiers: tierList.tiers.filter((tier) => tier.id !== tierId),
       assignments: tierList.assignments.filter((item) => item.tierId !== tierId),
+      unassignedOrder: [
+        ...unassignedDecks().map(({ deck }) => deck.id),
+        ...movedCommanderIds,
+      ],
     })
   }
 
-  const unassigned = allDecks.filter(
-    ({ deck }) => !tierList.assignments.some((assignment) => assignment.commanderId === deck.id),
-  )
+  const unassigned = unassignedDecks()
 
   return (
     <div className="tier-editor">
@@ -480,6 +552,15 @@ function TierListEditor({
           <p>Arraste para ordenar ou use as setas e o seletor em cada carta.</p>
         </div>
         <div className="tier-editor__header-actions">
+          <button
+            className={`button button--secondary randomizer-button ${shuffling ? 'is-shuffling' : ''}`}
+            type="button"
+            onClick={randomizeUnassigned}
+            disabled={shuffling || generatingImage || unassigned.length < 2}
+            title="Embaralha somente os decks que ainda estão sem tier"
+          >
+            <Icon name="shuffle" /> {shuffling ? 'Embaralhando…' : 'Randomizar Decks'}
+          </button>
           <button
             className="button button--secondary"
             type="button"
@@ -517,7 +598,7 @@ function TierListEditor({
               </button>
             </div>
 
-            <div className="tier-board">
+            <div className={`tier-board ${shuffling ? 'is-shuffling-unassigned' : ''}`}>
               {tierList.tiers.map((tier) => {
                 const tierDecks = decksForTier(tier.id)
                 return (
@@ -724,7 +805,22 @@ function DeckTile({
         )}
       </div>
       <div className="deck-tile__body">
-        <strong title={deckLabel(deck)}>{deckLabel(deck)}</strong>
+        <div className="deck-tile__title-row">
+          <strong title={deckLabel(deck)}>{deckLabel(deck)}</strong>
+          {deck.deckUrl && (
+            <a
+              href={deck.deckUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              draggable={false}
+              onClick={(event) => event.stopPropagation()}
+              aria-label={`Abrir decklist de ${deckLabel(deck)}`}
+              title="Abrir decklist"
+            >
+              <Icon name="link" />
+            </a>
+          )}
+        </div>
         <span>{participant.name}</span>
         <select
           value={currentTier}

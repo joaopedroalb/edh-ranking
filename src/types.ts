@@ -9,6 +9,7 @@ export type CommanderDeck = {
   id: string
   commander: CardData
   partner?: CardData
+  deckUrl?: string
 }
 
 export type Participant = {
@@ -42,6 +43,7 @@ export type TierList = {
   name: string
   tiers: Tier[]
   assignments: TierAssignment[]
+  unassignedOrder?: string[]
   createdAt: string
 }
 
