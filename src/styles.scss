@@ -1252,6 +1252,23 @@ svg {
   }
 }
 
+.deck-url-field {
+  max-width: 620px;
+  margin-top: 1rem;
+
+  label small {
+    margin-left: .25rem;
+    color: $muted;
+    font-size: .62rem;
+    font-weight: 500;
+  }
+
+  input[aria-invalid='true'] {
+    border-color: $danger !important;
+    box-shadow: 0 0 0 3px color-mix(in srgb, $danger 12%, transparent);
+  }
+}
+
 .partner-toggle {
   display: flex;
   align-items: center;
@@ -1829,9 +1846,33 @@ svg {
     display: flex;
     flex: 0 0 auto;
     align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: .6rem;
     margin-top: .4rem;
   }
+}
+
+.randomizer-button.is-shuffling svg {
+  animation: shuffle-icon .42s ease-in-out infinite alternate;
+}
+
+@keyframes shuffle-icon {
+  from { transform: rotate(-16deg) scale(.92); }
+  to { transform: rotate(16deg) scale(1.08); }
+}
+
+.tier-board.is-shuffling-unassigned .tier-row--unassigned .deck-tile {
+  pointer-events: none;
+  animation: deck-shuffle .42s ease-in-out infinite alternate;
+
+  &:nth-child(2n) { animation-delay: .07s; }
+  &:nth-child(3n) { animation-delay: .14s; }
+}
+
+@keyframes deck-shuffle {
+  from { transform: translate3d(-3px, -1px, 0) rotate(-.7deg); }
+  to { transform: translate3d(3px, 1px, 0) rotate(.7deg); }
 }
 
 .title-input {
@@ -2139,6 +2180,29 @@ svg {
       font-size: .58rem;
       font-weight: 700;
     }
+  }
+}
+
+.deck-tile__title-row {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: .3rem;
+
+  > strong { flex: 1; min-width: 0; }
+
+  > a {
+    width: 1.35rem;
+    height: 1.35rem;
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    color: $accent-dark;
+    background: color-mix(in srgb, $accent 18%, transparent);
+    border-radius: .35rem;
+
+    &:hover { color: $dark; background: $accent; }
+    svg { width: .75rem; height: .75rem; }
   }
 }
 
@@ -2802,10 +2866,24 @@ svg {
     }
 
     > span { display: grid; place-items: center; color: $muted; background: var(--bg-soft); }
-    strong { overflow: hidden; font-size: .62rem; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+    strong { flex: 1; overflow: hidden; font-size: .62rem; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
   }
 
   > p { grid-column: 1 / -1; margin: 0; color: $muted; font-size: .68rem; }
+}
+
+.details-deck-link {
+  width: 1.65rem;
+  height: 1.65rem;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  color: $accent-dark;
+  background: color-mix(in srgb, $accent 16%, transparent);
+  border-radius: .4rem;
+
+  &:hover { color: $dark; background: $accent; }
+  svg { width: .85rem; height: .85rem; }
 }
 
 .stats-heading {
@@ -3194,6 +3272,11 @@ svg {
     &__header {
       flex-direction: column;
       margin-bottom: 2rem;
+    }
+
+    &__header-actions {
+      width: 100%;
+      justify-content: flex-start;
     }
   }
 

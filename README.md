@@ -22,6 +22,8 @@ npm run build
 - Rotas compartilháveis com histórico do navegador e página 404
 - Tema claro/escuro persistido com detecção da preferência do sistema
 - Ordenação persistente dentro dos tiers e exportação da classificação em PNG
+- Links externos de decklist por deck, com validação HTTP/HTTPS
+- Randomização do pool “Sem tier”, alternando jogadores sempre que possível
 - Uso de `art_crop` da Scryfall com fallback para a imagem normal
 - Comandantes únicos ou em dupla
 - Busca com autocomplete e imagens pela API da Scryfall

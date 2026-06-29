@@ -1,4 +1,4 @@
-import { uid } from './lib'
+import { isValidDeckUrl, uid } from './lib'
 import type {
   CardData,
   CommanderDeck,
@@ -22,6 +22,7 @@ type ExportedCommander = {
   partnerImageUrl?: string
   partnerArtCropUrl?: string
   partnerScryfallId?: string
+  deckUrl?: string
 }
 
 type ExportedParticipant = {
@@ -36,6 +37,7 @@ type ExportedTierList = {
   createdAt?: string
   tiers: Tier[]
   assignments: TierAssignment[]
+  unassignedOrder?: string[]
 }
 
 export type GroupExportFile = {
@@ -135,6 +137,7 @@ export function createGroupExport(group: Group, tierLists: TierList[]): GroupExp
           ...(deck.partner?.imageUrl ? { partnerImageUrl: deck.partner.imageUrl } : {}),
           ...(deck.partner?.artCropUrl ? { partnerArtCropUrl: deck.partner.artCropUrl } : {}),
           ...(deck.partner?.scryfallId ? { partnerScryfallId: deck.partner.scryfallId } : {}),
+          ...(deck.deckUrl ? { deckUrl: deck.deckUrl } : {}),
         })),
       })),
       tierLists: tierLists
@@ -146,6 +149,9 @@ export function createGroupExport(group: Group, tierLists: TierList[]): GroupExp
             name: tierList.name,
             createdAt: tierList.createdAt,
             tiers: tierList.tiers.map((tier) => ({ ...tier })),
+            unassignedOrder: (tierList.unassignedOrder ?? []).filter((commanderId) =>
+              deckIds.has(commanderId),
+            ),
             assignments: tierList.assignments
               .filter(
                 (assignment) =>
@@ -228,7 +234,11 @@ export function parseGroupExport(raw: string, existingNames: string[]): GroupBun
             : {}),
         }
 
-        const deck: CommanderDeck = { id: newCommanderId, commander: card }
+        const deckUrl = readOptionalString(commander.deckUrl, `${commanderPath}.deckUrl`) ?? ''
+        if (deckUrl && !isValidDeckUrl(deckUrl)) {
+          throw new Error(`${commanderPath}.deckUrl deve ser uma URL HTTP ou HTTPS válida.`)
+        }
+        const deck: CommanderDeck = { id: newCommanderId, commander: card, deckUrl }
         if (commander.isPartner) {
           deck.partner = {
             name: readString(commander.partnerName, `${commanderPath}.partnerName`).trim(),
@@ -324,12 +334,32 @@ export function parseGroupExport(raw: string, existingNames: string[]): GroupBun
       },
     )
 
+    const seenUnassignedIds = new Set<string>()
+    const unassignedOrder = (
+      sourceList.unassignedOrder === undefined
+        ? []
+        : readArray(sourceList.unassignedOrder, `${path}.unassignedOrder`)
+    ).map((commanderIdValue, orderIndex) => {
+      const oldCommanderId = readString(
+        commanderIdValue,
+        `${path}.unassignedOrder[${orderIndex}]`,
+      )
+      if (seenUnassignedIds.has(oldCommanderId)) {
+        throw new Error(`${path}.unassignedOrder contém um comandante duplicado.`)
+      }
+      seenUnassignedIds.add(oldCommanderId)
+      const commanderId = commanderIdMap.get(oldCommanderId)
+      if (!commanderId) throw new Error(`${path}.unassignedOrder referencia um comandante inexistente.`)
+      return commanderId
+    })
+
     return {
       id: uid('tierlist'),
       groupId,
       name: readString(sourceList.name, `${path}.name`).trim(),
       tiers,
       assignments,
+      unassignedOrder,
       createdAt: readOptionalString(sourceList.createdAt, `${path}.createdAt`) || new Date().toISOString(),
     }
   })
@@ -361,6 +391,7 @@ export function cloneGroupBundle(
       return {
         id,
         commander: { ...deck.commander },
+        deckUrl: deck.deckUrl,
         ...(deck.partner ? { partner: { ...deck.partner } } : {}),
       }
     }),
@@ -392,6 +423,10 @@ export function cloneGroupBundle(
           const commanderId = commanderIdMap.get(assignment.commanderId)
           const tierId = tierIdMap.get(assignment.tierId)
           return commanderId && tierId ? [{ commanderId, tierId }] : []
+        }),
+        unassignedOrder: (tierList.unassignedOrder ?? []).flatMap((commanderId) => {
+          const mappedId = commanderIdMap.get(commanderId)
+          return mappedId ? [mappedId] : []
         }),
         createdAt: new Date().toISOString(),
       }

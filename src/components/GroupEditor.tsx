@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { createDeck, createGroup, createParticipant, emptyCard } from '../lib'
+import { createDeck, createGroup, createParticipant, emptyCard, isValidDeckUrl } from '../lib'
 import { useStore } from '../store'
 import { downloadGroupExport } from '../transfer'
 import type { CardData, CommanderDeck, Group, Participant } from '../types'
@@ -96,6 +96,14 @@ export function GroupEditor({ group: savedGroup, onCancel, onSaved }: Props) {
       setError('Preencha os nomes de todos os comandantes adicionados.')
       return
     }
+    if (
+      group.participants.some((participant) =>
+        participant.commanders.some((deck) => deck.deckUrl?.trim() && !isValidDeckUrl(deck.deckUrl)),
+      )
+    ) {
+      setError('Corrija os links de deck inválidos. Use uma URL começando com http:// ou https://.')
+      return
+    }
 
     const normalized: Group = {
       ...group,
@@ -105,6 +113,7 @@ export function GroupEditor({ group: savedGroup, onCancel, onSaved }: Props) {
         name: participant.name.trim(),
         commanders: participant.commanders.map((deck) => ({
           ...deck,
+          deckUrl: deck.deckUrl?.trim() ?? '',
           commander: { ...deck.commander, name: deck.commander.name.trim() },
           ...(deck.partner
             ? { partner: { ...deck.partner, name: deck.partner.name.trim() } }
@@ -337,7 +346,7 @@ function DeckEditor({
               onChange((item) =>
                 event.target.checked
                   ? { ...item, partner: emptyCard() }
-                  : { id: item.id, commander: item.commander },
+                  : { id: item.id, commander: item.commander, deckUrl: item.deckUrl },
               )
             }
           />
@@ -360,6 +369,25 @@ function DeckEditor({
             <div className="partner-plus">+</div>
             <CommanderField card={deck.partner} label="Comandante 2" onChange={setPartner} />
           </>
+        )}
+      </div>
+      <div className="field deck-url-field">
+        <label htmlFor={`deck-url-${deck.id}`}>Link do deck <small>opcional</small></label>
+        <div className="input-with-icon">
+          <Icon name="link" />
+          <input
+            id={`deck-url-${deck.id}`}
+            type="url"
+            value={deck.deckUrl ?? ''}
+            placeholder="https://www.moxfield.com/decks/..."
+            aria-invalid={Boolean(deck.deckUrl?.trim() && !isValidDeckUrl(deck.deckUrl))}
+            onChange={(event) =>
+              onChange((item) => ({ ...item, deckUrl: event.target.value }))
+            }
+          />
+        </div>
+        {deck.deckUrl?.trim() && !isValidDeckUrl(deck.deckUrl) && (
+          <small className="field-error">Informe uma URL completa começando com http:// ou https://.</small>
         )}
       </div>
     </div>
